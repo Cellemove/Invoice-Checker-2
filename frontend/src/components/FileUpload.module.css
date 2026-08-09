@@ -1,0 +1,114 @@
+/* FileUpload: header controls + dropzone. */
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.controls {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.selectLabel select {
+  min-width: 170px;
+}
+
+/* ── Dropzone ───────────────────────────────────────────── */
+.dropzone {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 2.2rem 1.5rem;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.dropzone:hover,
+.dragging {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.dropzone:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--focus);
+}
+.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.disabled:hover {
+  border-color: var(--border-strong);
+  background: transparent;
+}
+
+.icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  font-size: 1.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.title {
+  font-size: 0.92rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.alertGap {
+  margin-top: 0.75rem;
+}
+
+.filePill {
+  margin-top: 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.32rem 0.85rem;
+  font-size: 0.8rem;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .controls {
+    width: 100%;
+  }
+  .controls > * {
+    flex: 1;
+    min-width: 0;
+  }
+  .selectLabel select {
+    min-width: 0;
+    width: 100%;
+  }
+  .dropzone {
+    padding: 1.6rem 1rem;
+  }
+}

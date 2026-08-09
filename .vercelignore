@@ -1,0 +1,22 @@
+# Secrets — NEVER upload. Credentials go into Vercel env vars instead.
+.env
+.env.*
+backend/.env
+backend/service-account.json
+*service-account*.json
+gcp-*.json
+backend/.shopify_tokens.json
+
+# Local working state / data files (the app reads these from Google Drive)
+backend/.active_quotation.xlsx
+backend/.active_quotation.json
+backend/*.xlsx
+sample-data/
+
+# Build & tooling artifacts
+node_modules
+frontend/dist
+__pycache__/
+*.pyc
+.venv/
+venv/

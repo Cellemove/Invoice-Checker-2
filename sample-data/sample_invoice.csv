@@ -1,0 +1,7 @@
+Order Number,SKU,Product,Quantity,Unit Price,Line Total
+1001,TSHIRT-BLK-M,Black T-Shirt (M),2,19.99,39.98
+1001,MUG-WHT,White Mug,1,9.50,9.50
+1002,HOODIE-GRY-L,Grey Hoodie (L),1,49.00,49.00
+1002,STICKER-PACK,Sticker Pack,3,3.00,9.00
+1003,CAP-NVY,Navy Cap,1,15.00,15.00
+1004,UNKNOWN-SKU-XYZ,Mystery Item,1,99.99,99.99
