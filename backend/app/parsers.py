@@ -310,6 +310,8 @@ def parse_invoice(filename: str, content: bytes) -> ParsedInvoice:
     invoice_total = _extract_invoice_total(df, header_map)
 
     line_items: List[InvoiceLineItem] = []
+    prev_order_id: Optional[str] = None
+    prev_package: Optional[str] = None
     for idx, (_, raw) in enumerate(df.iterrows(), start=2):  # row 1 == header
         order_id = (
             _clean_str(raw[header_map["order_id"]])
@@ -381,6 +383,13 @@ def parse_invoice(filename: str, content: bytes) -> ParsedInvoice:
             [quantity, unit_price, line_total]
         ):
             continue
+
+        # Continuation rows: supplier files write the order number only on the
+        # first row of a package — later items of the same package leave the
+        # cell blank. Inherit it so those rows stay attached to their order.
+        if not order_id and package and package == prev_package:
+            order_id = prev_order_id
+        prev_order_id, prev_package = order_id, package
 
         # Derive line_total when absent but qty * price is available.
         if not line_total and quantity and unit_price:

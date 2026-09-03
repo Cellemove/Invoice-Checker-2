@@ -139,7 +139,9 @@ def _extract_country_label(header: object) -> Optional[str]:
     if "TOTAL TO" in text:
         label = text.split("TOTAL TO", 1)[1].strip()
     elif text.startswith("NEW LINE TO "):
-        label = text
+        # Keep just the destination — newer files append the ZIP range
+        # ('NEW line to US\n11k+ ZIP codes').
+        label = " ".join(text.split()[:4])
     else:
         return None
     if not label:
@@ -248,31 +250,29 @@ class Quotation:
         self._resolve_cache[query] = resolved
         return resolved
 
-    def _country_plan(self, country: str) -> Tuple[List[str], List[PriceTable]]:
-        """Candidate labels + table order for an invoice country value.
+    def _country_plan(self, country: str) -> List[Tuple[str, List[PriceTable]]]:
+        """(candidate label, tables-in-priority-order) pairs for a country.
 
         'NEW LINE TO US' first tries a literal 'NEW LINE TO US' column (newer
-        files put the special line in the main sheet), then falls back to the
-        bare country in the special-line table. Everything else prefers the
-        standard table, falling back to the special one for products that only
-        ship on the special line (liquids/creams).
+        files put the special line in the main sheet, which wins), then falls
+        back to the bare country in the special-line table. Everything else
+        prefers the standard table, falling back to the special one for
+        products that only ship on the special line (liquids/creams).
         """
         c = " ".join(str(country or "").split()).upper()
         if not c:
-            return [], self._tables
-        special_first = c.startswith("NEW LINE TO ")
-        candidates = [c]
-        if special_first:
-            candidates.append(c.rsplit(" ", 1)[-1])
-        tables = sorted(self._tables, key=lambda t: t.special != special_first)
-        return candidates, tables
+            return []
+        std_first = sorted(self._tables, key=lambda t: t.special)
+        if c.startswith("NEW LINE TO "):
+            special_first = sorted(self._tables, key=lambda t: not t.special)
+            return [(c, std_first), (c.rsplit(" ", 1)[-1], special_first)]
+        return [(c, std_first)]
 
     def price(self, sku: str, qty: int, country: str) -> Optional[float]:
         key = self._resolve(sku)
         if key is None:
             return None
-        candidates, tables = self._country_plan(country)
-        for cand in candidates:
+        for cand, tables in self._country_plan(country):
             for t in tables:
                 col = t.resolve_label(cand)
                 if col is None:
@@ -300,8 +300,7 @@ class Quotation:
         key = self._resolve(sku)
         if key is None:
             return None
-        candidates, _ = self._country_plan(country)
-        for cand in candidates:
+        for cand, _tables in self._country_plan(country):
             col = self._upsell.resolve_label(cand)
             if col is None:
                 continue
@@ -314,8 +313,7 @@ class Quotation:
         key = self._resolve(sku)
         if key is None:
             return None
-        candidates, tables = self._country_plan(country)
-        for cand in candidates:
+        for cand, tables in self._country_plan(country):
             for t in tables:
                 col = t.resolve_label(cand)
                 if col is None:
@@ -362,8 +360,9 @@ class Quotation:
         """Return (expected_pre_tax_price, error_reason) for one order.
 
         Combined-shipment model: the most expensive product carries its full
-        quotation price at its quantity; every other product's units add the
-        quotation's per-unit increment (tier-2 minus tier-1).
+        tier-table price at its quantity; every other product's units add that
+        product's per-unit rate — the Upsell sheet when the quotation has one,
+        else the tier-to-tier increment (tier-2 minus tier-1).
         """
         cc = (country or "").strip().upper()
         if not cc:
@@ -392,36 +391,27 @@ class Quotation:
         primary = max(by_base, key=unit_price)
         pq = by_base[primary]
 
-        # Newer quotations carry an 'Upsell' sheet: the supplier bills the
-        # first unit at the regular qty-1 price and EVERY additional unit
-        # (extra units of the primary included) at that product's upsell rate.
-        if self._upsell is not None:
-            first = self.price(primary, 1, cc)
-            if first is None:
-                return None, f"no quotation for {primary} to {cc}"
-            total = first
-            for base, qty in by_base.items():
-                extra = qty - 1 if base == primary else qty
-                if extra <= 0:
-                    continue
-                rate = self.upsell_rate(base, cc)
-                if rate is None:
-                    # SKU absent from the Upsell sheet — old marginal fallback.
-                    marg = self.marginal(base, cc)
-                    if marg is None:
-                        return None, f"no upsell rate for {base} to {cc}"
-                    rate = marg + self._variant_premium(base, cc)
-                total += rate * extra
-            return round(total, 2), None
+        def addon_rate(base: str) -> Optional[float]:
+            # Per-unit price of an item added to an existing shipment: the
+            # quotation's Upsell sheet when present; otherwise the tier-to-tier
+            # marginal, plus the variant premium (e.g. '(Pocket)') that is
+            # baked into base tiers but not into the marginals.
+            rate = self.upsell_rate(base, cc)
+            if rate is not None:
+                return rate
+            marg = self.marginal(base, cc)
+            if marg is None:
+                return None
+            return marg + self._variant_premium(base, cc)
 
         base_price = self.price(primary, pq, cc)
         if base_price is None:
             # Quantity beyond the tier table → extrapolate from the top tier.
             top = self._max_tier(primary)
             top_price = self.price(primary, top, cc) if top else None
-            marg = self.marginal(primary, cc)
-            if top_price is not None and marg is not None and pq > top:
-                base_price = round(top_price + marg * (pq - top), 2)
+            rate = addon_rate(primary)
+            if top_price is not None and rate is not None and pq > top:
+                base_price = round(top_price + rate * (pq - top), 2)
         if base_price is None:
             return None, f"no quotation for {primary} ×{pq} to {cc}"
 
@@ -429,13 +419,10 @@ class Quotation:
         for base, qty in by_base.items():
             if base == primary:
                 continue
-            marg = self.marginal(base, cc)
-            if marg is None:
+            rate = addon_rate(base)
+            if rate is None:
                 return None, f"no add-on rate for {base} to {cc}"
-            # Variant premiums (e.g. '(Pocket)') are baked into base tiers but
-            # NOT into tier-to-tier marginals; the supplier still bills them
-            # per add-on unit, so add the qty-1 premium over the plain sibling.
-            total += (marg + self._variant_premium(base, cc)) * qty
+            total += rate * qty
         return round(total, 2), None
 
     def _variant_premium(self, base: str, cc: str) -> float:
