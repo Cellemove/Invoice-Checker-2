@@ -212,11 +212,13 @@ class Quotation:
         name: str,
         path: Optional[Path] = None,
         au_zones: Optional[Dict[int, int]] = None,
+        upsell: Optional[PriceTable] = None,
     ) -> None:
         # SKU keys are stored normalised (see _norm_key); lookups resolve
         # through _resolve so ASCII/full-width, case, spacing and one-letter
         # typos in either file still match.
         self._tables = tables      # standard table(s) first, special last
+        self._upsell = upsell      # 'Upsell' sheet: per-unit rate for 2nd+ units
         self.countries = countries
         self.name = name           # display name of the source file
         self.path = path           # local path when file-backed (None for Drive)
@@ -290,6 +292,23 @@ class Quotation:
             if tiers:
                 best = max(best, max(tiers))
         return best
+
+    def upsell_rate(self, sku: str, country: str) -> Optional[float]:
+        """Per-unit price for 2nd+ units, from the quotation's 'Upsell' sheet."""
+        if self._upsell is None:
+            return None
+        key = self._resolve(sku)
+        if key is None:
+            return None
+        candidates, _ = self._country_plan(country)
+        for cand in candidates:
+            col = self._upsell.resolve_label(cand)
+            if col is None:
+                continue
+            value = self._upsell.lookup.get(key, {}).get(1, {}).get(col)
+            if value is not None:
+                return value
+        return None
 
     def marginal(self, sku: str, country: str) -> Optional[float]:
         key = self._resolve(sku)
@@ -372,6 +391,28 @@ class Quotation:
 
         primary = max(by_base, key=unit_price)
         pq = by_base[primary]
+
+        # Newer quotations carry an 'Upsell' sheet: the supplier bills the
+        # first unit at the regular qty-1 price and EVERY additional unit
+        # (extra units of the primary included) at that product's upsell rate.
+        if self._upsell is not None:
+            first = self.price(primary, 1, cc)
+            if first is None:
+                return None, f"no quotation for {primary} to {cc}"
+            total = first
+            for base, qty in by_base.items():
+                extra = qty - 1 if base == primary else qty
+                if extra <= 0:
+                    continue
+                rate = self.upsell_rate(base, cc)
+                if rate is None:
+                    # SKU absent from the Upsell sheet — old marginal fallback.
+                    marg = self.marginal(base, cc)
+                    if marg is None:
+                        return None, f"no upsell rate for {base} to {cc}"
+                    rate = marg + self._variant_premium(base, cc)
+                total += rate * extra
+            return round(total, 2), None
 
         base_price = self.price(primary, pq, cc)
         if base_price is None:
@@ -474,7 +515,8 @@ def _pick_pricing_sheet(sheetnames: List[str]) -> str:
     for s in sheetnames:
         if "qty" in str(s).lower():
             return s
-    return sheetnames[0]
+    candidates = [s for s in sheetnames if "upsell" not in str(s).lower()]
+    return candidates[0] if candidates else sheetnames[0]
 
 
 def _parse_price_sheet(rows, special: bool) -> Optional[PriceTable]:
@@ -578,6 +620,19 @@ def _parse_workbook(wb, name: str, path: Optional[Path]) -> Quotation:
             f"No pricing rows parsed from quotation sheets {wb.sheetnames}."
         )
 
+    # 'Upsell' sheet (same layout, single QTY=1 row per SKU): per-unit rate
+    # billed for every unit after the first in a package.
+    upsell_table: Optional[PriceTable] = None
+    for sname in wb.sheetnames:
+        if "upsell" not in str(sname).lower():
+            continue
+        rows = [r for r in wb[sname].iter_rows(values_only=True)]
+        if len(rows) >= 3:
+            upsell_table = _parse_price_sheet(rows, special=False)
+        if upsell_table:
+            used_sheets.append(sname)
+            break
+
     au_zones = _extract_au_zones(wb)
 
     quotation = Quotation(
@@ -586,6 +641,7 @@ def _parse_workbook(wb, name: str, path: Optional[Path]) -> Quotation:
         name=name,
         path=path,
         au_zones=au_zones,
+        upsell=upsell_table,
     )
     logger.info(
         "Loaded quotation from %s: %d SKUs, %d countries, %d AU zone postcodes "
