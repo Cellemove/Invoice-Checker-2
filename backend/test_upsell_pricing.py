@@ -36,6 +36,15 @@ def main() -> None:
     )
     assert err is None and abs(pm - (7.077584 + 2 * 0.537057)) < 0.01, (pm, err)
 
+    # Sep-format quotation: extra product sheets (V2 leggings) and multiline
+    # SKU cells ('CE023\nS-3XL') in the Upsell sheet.
+    sep = _parse(Path("Farid-Cellumove quotation-Sep.01.xlsx"))
+    assert sep.upsell_rate("CE023", "CZ") is not None
+    pv, err = sep.expected_order_price(
+        [_item("AEP001", 3), _item("CE003", 1)], "DE"
+    )
+    assert err is None and abs(pv - 18.01) < 0.01, (pv, err)
+
     # Old-format quotation (no Upsell sheet): tier-table path unchanged.
     old = _parse(Path("Farid-Cellumove quotation-June.5.xlsx"))
     assert old.upsell_rate("CE001", "CZ") is None
